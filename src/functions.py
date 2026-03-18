@@ -60,3 +60,54 @@ def build_preprocessor(cpg_cols, categorical_cols):
     ])
 
     return preprocessor
+
+
+
+import numpy as np
+from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
+from scipy.stats import pearsonr
+
+
+def compute_metrics(y_true, y_pred):
+    rmse = np.sqrt(mean_squared_error(y_true, y_pred))
+    mae = mean_absolute_error(y_true, y_pred)
+    r2 = r2_score(y_true, y_pred)
+    r, _ = pearsonr(y_true, y_pred)
+
+    return rmse, mae, r2, r
+
+
+
+def bootstrap_evaluation(y_true, y_pred, n_bootstrap=1000, seed=42):
+
+    np.random.seed(seed)
+
+    metrics = []
+
+    n = len(y_true)
+
+    for _ in range(n_bootstrap):
+        idx = np.random.choice(n, n, replace=True)
+
+        y_t = y_true.iloc[idx]
+        y_p = y_pred[idx]
+
+        metrics.append(compute_metrics(y_t, y_p))
+
+    metrics = np.array(metrics)
+
+    results = {
+        "rmse_mean": metrics[:,0].mean(),
+        "rmse_ci": np.percentile(metrics[:,0], [2.5, 97.5]),
+
+        "mae_mean": metrics[:,1].mean(),
+        "mae_ci": np.percentile(metrics[:,1], [2.5, 97.5]),
+
+        "r2_mean": metrics[:,2].mean(),
+        "r2_ci": np.percentile(metrics[:,2], [2.5, 97.5]),
+
+        "pearson_mean": metrics[:,3].mean(),
+        "pearson_ci": np.percentile(metrics[:,3], [2.5, 97.5]),
+    }
+
+    return results, metrics
