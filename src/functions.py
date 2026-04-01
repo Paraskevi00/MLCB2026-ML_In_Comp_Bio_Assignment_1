@@ -65,11 +65,14 @@ def format_results(model, stage, results):
     return {
         "Model": model,
         "Stage": stage,
-        "RMSE (mean)": f"{np.mean(results['rmse']):.2f}",
-        "95% CI": f"[{np.percentile(results['rmse'],2.5):.2f}, {np.percentile(results['rmse'],97.5):.2f}]",
-        "MAE": f"{np.mean(results['mae']):.2f}",
-        "R2": f"{np.mean(results['r2']):.2f}",
-        "Pearson r": f"{np.mean(results['pearson']):.2f}"
+        
+        "RMSE": f"{np.mean(results['rmse']):.2f} [{np.percentile(results['rmse'],2.5):.2f}, {np.percentile(results['rmse'],97.5):.2f}]",
+        
+        "MAE": f"{np.mean(results['mae']):.2f} [{np.percentile(results['mae'],2.5):.2f}, {np.percentile(results['mae'],97.5):.2f}]",
+        
+        "R2": f"{np.mean(results['r2']):.2f} [{np.percentile(results['r2'],2.5):.2f}, {np.percentile(results['r2'],97.5):.2f}]",
+        
+        "Pearson r": f"{np.mean(results['pearson']):.2f} [{np.percentile(results['pearson'],2.5):.2f}, {np.percentile(results['pearson'],97.5):.2f}]"
     }
 
 
@@ -77,9 +80,9 @@ def summarize_results(name, results):
     return {
         "Model": name,
         "RMSE": f"{np.mean(results['rmse']):.2f} [{np.percentile(results['rmse'],2.5):.2f}, {np.percentile(results['rmse'],97.5):.2f}]",
-        "MAE": f"{np.mean(results['mae']):.2f}",
-        "R2": f"{np.mean(results['r2']):.2f}",
-        "Pearson r": f"{np.mean(results['pearson']):.2f}"
+        "MAE": f"{np.mean(results['mae']):.2f} [{np.percentile(results['mae'],2.5):.2f}, {np.percentile(results['mae'],97.5):.2f}]",
+        "R2": f"{np.mean(results['r2']):.2f} [{np.percentile(results['r2'],2.5):.2f}, {np.percentile(results['r2'],97.5):.2f}]",
+        "Pearson r": f"{np.mean(results['pearson']):.2f} [{np.percentile(results['pearson'],2.5):.2f}, {np.percentile(results['pearson'],97.5):.2f}]"
     }
 
 def prepare_boxplot_data(results, model_name):
@@ -177,8 +180,8 @@ def build_final_pipeline(preprocessor, selected_features, best_model):
 def plot_predictions(y_true, y_pred, title, filename):
     plt.figure(figsize=(6,6))
     plt.scatter(y_true, y_pred, alpha=0.6)
-    plt.xlabel("Actual Age")
-    plt.ylabel("Predicted Age")
+    plt.xlabel("Actual Age (Years)")
+    plt.ylabel("Predicted Age (Years)")
     plt.title(title)
 
     # diagonal line
@@ -196,6 +199,7 @@ from sklearn.model_selection import cross_val_score
 from sklearn.linear_model import ElasticNet, BayesianRidge
 from sklearn.svm import SVR
 
+from sklearn.base import clone
 
 def optuna_tune_model(model_name, pipeline, X_train, y_train, n_trials=40, cv=5):
     
@@ -204,14 +208,12 @@ def optuna_tune_model(model_name, pipeline, X_train, y_train, n_trials=40, cv=5)
         if model_name == "ElasticNet":
             alpha = trial.suggest_float("alpha", 0.001, 10, log=True)
             l1_ratio = trial.suggest_float("l1_ratio", 0.1, 1.0)
-
             model = ElasticNet(alpha=alpha, l1_ratio=l1_ratio)
 
         elif model_name == "SVR":
             C = trial.suggest_float("C", 0.1, 500, log=True)
             epsilon = trial.suggest_categorical("epsilon", [0.01, 0.1, 0.5, 1.0])
             kernel = trial.suggest_categorical("kernel", ["rbf", "linear"])
-
             model = SVR(C=C, epsilon=epsilon, kernel=kernel)
 
         elif model_name == "BayesianRidge":
@@ -230,23 +232,22 @@ def optuna_tune_model(model_name, pipeline, X_train, y_train, n_trials=40, cv=5)
         else:
             raise ValueError("Unknown model")
 
-        # update pipeline model
-        pipeline.set_params(model=model)
+        pipe = clone(pipeline)
+        pipe.set_params(model=model)
 
         scores = cross_val_score(
-            pipeline,
+            pipe,
             X_train,
             y_train,
             cv=cv,
             scoring="neg_root_mean_squared_error"
         )
 
-        return -np.mean(scores)  # RMSE
+        return -np.mean(scores)
 
     study = optuna.create_study(direction="minimize")
     study.optimize(objective, n_trials=n_trials)
 
-    # best model
     best_params = study.best_params
 
     print("Best params:", best_params)
@@ -260,12 +261,11 @@ def optuna_tune_model(model_name, pipeline, X_train, y_train, n_trials=40, cv=5)
     elif model_name == "BayesianRidge":
         best_model = BayesianRidge(**best_params)
 
-    pipeline.set_params(model=best_model)
+    final_pipeline = clone(pipeline)
+    final_pipeline.set_params(model=best_model)
+    final_pipeline.fit(X_train, y_train)
 
-    pipeline.fit(X_train, y_train)
-
-    return pipeline, study
-
+    return final_pipeline, study
 
 
 from sklearn.metrics import accuracy_score, f1_score, matthews_corrcoef, roc_auc_score, average_precision_score
@@ -301,34 +301,40 @@ def evaluate_bootstrap_classification(y_true, y_pred, y_prob, n_iterations=1000,
     def ci(arr):
         return np.nanpercentile(arr, [2.5, 97.5])
 
-    return {
+    results = {
         "accuracy": acc_list,
         "f1": f1_list,
         "mcc": mcc_list,
         "roc_auc": roc_list,
-        "pr_auc": pr_list
+        "pr_auc": pr_list,
+        "summary": {
+            "Accuracy": (np.nanmean(acc_list), ci(acc_list)),
+            "F1": (np.nanmean(f1_list), ci(f1_list)),
+            "MCC": (np.nanmean(mcc_list), ci(mcc_list)),
+            "ROC-AUC": (np.nanmean(roc_list), ci(roc_list)),
+            "PR-AUC": (np.nanmean(pr_list), ci(pr_list)),
+        }
     }
+
+    return results
     
 def print_classification_results(name, results):
     print(f"\n{name}")
     print("-" * 40)
 
-    print(f"Accuracy: {np.mean(results['accuracy']):.4f}")
-    print(f"F1: {np.mean(results['f1']):.4f}")
-    print(f"MCC: {np.mean(results['mcc']):.4f}")
-    print(f"ROC-AUC: {np.mean(results['roc_auc']):.4f}")
-    print(f"PR-AUC: {np.mean(results['pr_auc']):.4f}")
+    for metric, (mean, ci) in results["summary"].items():
+        print(f"{metric}: {mean:.4f} (95% CI: [{ci[0]:.4f}, {ci[1]:.4f}])")
 
 
 def format_results_classification(model, stage, results):
     return {
         "Model": model,
         "Stage": stage,
-        "Accuracy": f"{np.mean(results['accuracy']):.2f}",
-        "95% CI": f"[{np.percentile(results['accuracy'],2.5):.2f}, {np.percentile(results['accuracy'],97.5):.2f}]",
-        "F1": f"{np.mean(results['f1']):.2f}",
-        "MCC": f"{np.mean(results['mcc']):.2f}",
-        "ROC-AUC": f"{np.mean(results['roc_auc']):.2f}",
+        "Accuracy": f"{np.mean(results['accuracy']):.2f} [{np.percentile(results['accuracy'],2.5):.2f}, {np.percentile(results['accuracy'],97.5):.2f}]",
+        "F1": f"{np.mean(results['f1']):.2f} [{np.percentile(results['f1'],2.5):.2f}, {np.percentile(results['f1'],97.5):.2f}]",
+        "MCC": f"{np.mean(results['mcc']):.2f} [{np.percentile(results['mcc'],2.5):.2f}, {np.percentile(results['mcc'],97.5):.2f}]",
+        "ROC-AUC": f"{np.mean(results['roc_auc']):.2f} [{np.percentile(results['roc_auc'],2.5):.2f}, {np.percentile(results['roc_auc'],97.5):.2f}]",
+        "PR-AUC": f"{np.mean(results['pr_auc']):.2f} [{np.percentile(results['pr_auc'],2.5):.2f}, {np.percentile(results['pr_auc'],97.5):.2f}]",
         "Features": ""
     }
 
