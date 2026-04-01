@@ -85,7 +85,9 @@ def summarize_results(name, results):
 def prepare_boxplot_data(results, model_name):
     return pd.DataFrame({
         "RMSE": results["rmse"],
+        "MAE": results["mae"],
         "R2": results["r2"],
+        "Pearson r": results["pearson"],
         "Model": model_name
     })
 
