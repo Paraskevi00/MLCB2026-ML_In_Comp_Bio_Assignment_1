@@ -3,11 +3,3 @@ data/
 
 # Ignore csv datasets
 *.csv
-
-# Ignore saved models
-*.pkl
-*.joblib
-
-# Python cache
-__pycache__/
-*.pyc
